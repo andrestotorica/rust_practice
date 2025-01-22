@@ -7,12 +7,14 @@ struct BinancePriceProvider {
 }
 
 impl BinancePriceProvider {
+    const SYMBOL: &'static str = "BTCUSDC";
+
     fn new(binance_api: Box <dyn BinanceAPI>) -> BinancePriceProvider {
         BinancePriceProvider{ binance_api }
     }
 
     fn prices(&self) -> anyhow::Result<Vec<f64>> {
-        let api_response = self.binance_api.agg_trades("BTC/USDT")?;
+        let api_response = self.binance_api.agg_trades(Self::SYMBOL)?;
         let response_json: AggTradesResponse = serde_json::from_str(&api_response)?;
         
         let mut count = 0;
@@ -39,7 +41,7 @@ mod tests {
     use assert_float_eq::assert_float_absolute_eq;
 
     fn binance_provider_fixture(response: fn()->anyhow::Result<String>) -> BinancePriceProvider {
-        let b_api = FakeBinanceAPI{ response, expected_symbol: "BTC/USDT".to_string() };
+        let b_api = FakeBinanceAPI{ response, expected_symbol: BinancePriceProvider::SYMBOL.into() };
         BinancePriceProvider::new(Box::new(b_api))
     }
 
@@ -60,9 +62,7 @@ mod tests {
 
     #[test]
     fn test_binance_provider_returns_price_if_just_one_price() {
-        let api_response = || Ok(
-            r#"[{"a": 26129,"p": "0.01633102","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true }]"#.to_string()
-        );
+        let api_response = || Ok(FakeBinanceAPI::SINGLE_PRICE_RESPONSE.to_string());
         let binance_provider = binance_provider_fixture(api_response);
         let prices = binance_provider.prices().unwrap();
         assert_eq!( prices.len(), 1 );
@@ -71,12 +71,7 @@ mod tests {
  
     #[test]
     fn test_binance_provider_returns_average_price_if_many_prices() {
-        let api_response = || Ok( 
-            concat!(
-                r#"[{"a": 26129,"p": "1.0","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true },"#,
-                r#"{"a": 26129,"p": "2.5","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true },"#,
-                r#"{"a": 26129,"p": "3.5","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true }]"#
-            ).to_string() );
+        let api_response = || Ok(FakeBinanceAPI::MULTIPLE_PRICES_RESPONSE.to_string());
         let binance_provider = binance_provider_fixture(api_response);
         let prices = binance_provider.prices().unwrap();
         assert_eq!( prices.len(), 1 );
@@ -92,19 +87,14 @@ mod tests {
 
     #[test]
     fn test_binance_provider_returns_error_on_missing_price_data() {
-        let api_response = || Ok(
-            // missing the price field field
-            r#"[{"a": 26129,"q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true }]"#.to_string()
-        );
+        let api_response = || Ok(FakeBinanceAPI::MISSING_PRICE_RESPONSE.to_string());
         let binance_provider = binance_provider_fixture(api_response);
         assert!( binance_provider.prices().is_err() );
     }
 
     #[test]
     fn test_binance_provider_returns_error_on_non_numeric_price_data() {
-        let api_response = || Ok(
-            r#"[{"a": 26129,"p": "notafloat","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true }]"#.to_string()
-        );
+        let api_response = || Ok(FakeBinanceAPI::INVALID_PRICE_RESPONSE.to_string());
         let binance_provider = binance_provider_fixture(api_response);
         assert!( binance_provider.prices().is_err() );
     }
@@ -117,6 +107,16 @@ mod tests {
     struct FakeBinanceAPI {
         response: fn() -> anyhow::Result<String>,
         expected_symbol: String,
+    }
+    impl FakeBinanceAPI {
+        const SINGLE_PRICE_RESPONSE: &'static str = r#"[{"a": 26129,"p": "0.01633102","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true }]"#;
+        const MULTIPLE_PRICES_RESPONSE: &'static str = concat!(
+            r#"[{"a": 26129,"p": "1.0","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true },"#,
+            r#"{"a": 26129,"p": "2.5","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true },"#,
+            r#"{"a": 26129,"p": "3.5","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true }]"#
+        );
+        const MISSING_PRICE_RESPONSE: &'static str = r#"[{"a": 26129,"q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true }]"#;
+        const INVALID_PRICE_RESPONSE: &'static str = r#"[{"a": 26129,"p": "notafloat","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true }]"#;
     }
     impl BinanceAPI for FakeBinanceAPI {
         fn agg_trades(&self, symbol: &str) -> anyhow::Result<String> {
