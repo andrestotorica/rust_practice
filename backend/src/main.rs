@@ -1,5 +1,7 @@
 mod env;
 mod local_db;
+mod price_providers;
+
 use local_db::LocalDb;
 
 const DEFAULT_TOKENS: [&str; 2] = ["UNI", "ZRX"];
