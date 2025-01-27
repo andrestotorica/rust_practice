@@ -3,6 +3,13 @@ use serde::Deserialize;
 pub trait BinanceAPI { 
     /// GET /api/v3/aggTrades
     /// 
+    /// Parameters
+    /// symbol      STRING  YES    
+    /// fromId      LONG    NO  ID to get aggregate trades from INCLUSIVE.
+    /// startTime   LONG    NO  Timestamp in ms to get aggregate trades from INCLUSIVE.
+    /// endTime     LONG    NO  Timestamp in ms to get aggregate trades until INCLUSIVE.
+    /// limit       INT     NO  Default 500; max 1000.
+    /// 
     /// Expected Response:
     /// [
     ///   {
@@ -16,7 +23,13 @@ pub trait BinanceAPI {
     ///     "M": true           // Was the trade the best price match?
     ///   }
     /// ]
-    fn agg_trades(&self, symbol: &str) -> anyhow::Result<String>;
+    fn agg_trades(&self, 
+        symbol: &str,
+        from_id: Option<i64>,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: Option<i64>,
+    ) -> anyhow::Result<String>;
 }
 
 #[derive(Deserialize)]
