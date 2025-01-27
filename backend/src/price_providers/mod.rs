@@ -47,16 +47,16 @@ mod tests {
     
     #[test]
     fn test_can_create_a_binance_price_provider() {
-        let api_call: AggTradesCall = |_,_,_,_,_| Ok("[]".to_string());
+        let api_call: AggTradesCall = Box::new( |_,_,_,_,_| Ok("[]".to_string()) );
         let _binance_provider = create_binance_provider_fixture(api_call);
     }
 
     #[test]
     fn test_binance_provider_returns_empty_when_no_prices() {
-        let api_call: AggTradesCall = |symbol,_,_,_,_| {
+        let api_call: AggTradesCall = Box::new( |symbol,_,_,_,_| {
             assert_eq!( symbol, BinancePriceProvider::SYMBOL.to_string());
             Ok("[]".to_string())
-        };
+        });
         let binance_provider = create_binance_provider_fixture(api_call);
         let prices = binance_provider.prices();
         assert!( prices.is_ok() );
@@ -65,10 +65,10 @@ mod tests {
 
     #[test]
     fn test_binance_provider_returns_price_if_just_one_price() {
-        let api_call: AggTradesCall = |symbol,_,_,_,_| {
+        let api_call: AggTradesCall = Box::new( |symbol,_,_,_,_| {
             assert_eq!( symbol, BinancePriceProvider::SYMBOL.to_string());
             Ok(FakeBinanceAPI::SINGLE_PRICE_RESPONSE.to_string())
-        };
+        });
         let binance_provider = create_binance_provider_fixture(api_call);
         let prices = binance_provider.prices().unwrap();
         assert_eq!( prices.len(), 1 );
@@ -77,10 +77,10 @@ mod tests {
  
     #[test]
     fn test_binance_provider_returns_average_price_if_many_prices() {
-        let api_call: AggTradesCall = |symbol,_,_,_,_| {
+        let api_call: AggTradesCall = Box::new( |symbol,_,_,_,_| {
             assert_eq!( symbol, BinancePriceProvider::SYMBOL.to_string());
             Ok(FakeBinanceAPI::MULTIPLE_PRICES_RESPONSE.to_string())
-        };
+        });
         let binance_provider = create_binance_provider_fixture(api_call);
         let prices = binance_provider.prices().unwrap();
         assert_eq!( prices.len(), 1 );
@@ -89,21 +89,21 @@ mod tests {
 
     #[test]
     fn test_binance_provider_returns_error_on_api_error() {
-        let api_call: AggTradesCall = |_,_,_,_,_| Err( anyhow::Error::msg("some error") );
+        let api_call: AggTradesCall = Box::new( |_,_,_,_,_| Err( anyhow::Error::msg("some error") ));
         let binance_provider = create_binance_provider_fixture(api_call);
         assert!( binance_provider.prices().is_err() );
     }
 
     #[test]
     fn test_binance_provider_returns_error_on_missing_price_data() {
-        let api_call: AggTradesCall = |_,_,_,_,_| Ok(FakeBinanceAPI::MISSING_PRICE_RESPONSE.to_string());
+        let api_call: AggTradesCall = Box::new( |_,_,_,_,_| Ok(FakeBinanceAPI::MISSING_PRICE_RESPONSE.to_string()));
         let binance_provider = create_binance_provider_fixture(api_call);
         assert!( binance_provider.prices().is_err() );
     }
 
     #[test]
     fn test_binance_provider_returns_error_on_non_numeric_price_data() {
-        let api_call: AggTradesCall = |_,_,_,_,_| Ok(FakeBinanceAPI::INVALID_PRICE_RESPONSE.to_string());
+        let api_call: AggTradesCall = Box::new( |_,_,_,_,_| Ok(FakeBinanceAPI::INVALID_PRICE_RESPONSE.to_string()));
         let binance_provider = create_binance_provider_fixture(api_call);
         assert!( binance_provider.prices().is_err() );
     }
@@ -113,11 +113,7 @@ mod tests {
         // TODO
     // }
 
-    type AggTradesCall = fn(symbol: &str,
-                            from_id: Option<i64>,
-                            start_time: Option<i64>,
-                            end_time: Option<i64>,
-                            limit: Option<i64>) -> anyhow::Result<String>;
+    type AggTradesCall = Box<dyn Fn(&str,Option<i64>,Option<i64>,Option<i64>,Option<i64>) -> anyhow::Result<String> >;
     struct FakeBinanceAPI {
         response: AggTradesCall,
     }
