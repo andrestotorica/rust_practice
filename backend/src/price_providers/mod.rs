@@ -1,6 +1,7 @@
 mod binance_price_provider;
 
 use binance_price_provider::binance_api::{BinanceAPI, AggTradesResponse};
+use chrono::{DateTime, Duration, Utc};
 
 struct BinancePriceProvider {
     binance_api: Box<dyn BinanceAPI>,
@@ -8,13 +9,19 @@ struct BinancePriceProvider {
 
 impl BinancePriceProvider {
     const SYMBOL: &'static str = "BTCUSDC";
+    const TIME_WINDOW: Duration = Duration::minutes(1);
 
     fn new(binance_api: Box <dyn BinanceAPI>) -> BinancePriceProvider {
         BinancePriceProvider{ binance_api }
     }
 
-    fn prices(&self) -> anyhow::Result<Vec<f64>> {
-        let api_response = self.binance_api.agg_trades(Self::SYMBOL,None,None,None,None)?;
+    fn prices(&self, start_time: &DateTime<Utc>, end_time: &DateTime<Utc>) -> anyhow::Result<Vec<f64>> {
+        let api_response = self.binance_api.agg_trades(
+            Self::SYMBOL,
+            None,
+            Some( start_time.timestamp_millis() ),
+            Some( end_time.timestamp_millis() ),
+            None)?;
         let response_json: AggTradesResponse = serde_json::from_str(&api_response)?;
         
         let mut count = 0;
@@ -39,6 +46,14 @@ mod tests {
 
     extern crate assert_float_eq;
     use assert_float_eq::assert_float_absolute_eq;
+    use chrono::prelude::*;
+    use std::sync::LazyLock;
+
+    // Default time values spaning just one time window
+    const START_TIME: LazyLock<DateTime<Utc>> = LazyLock::new( || 
+        Utc.with_ymd_and_hms(2025,1,27,14,0,0).unwrap() );
+    const  END_TIME: LazyLock<DateTime<Utc>> = LazyLock::new( || 
+        *START_TIME + BinancePriceProvider::TIME_WINDOW - Duration::seconds(1) );
 
     fn create_binance_provider_fixture(response: AggTradesCall) -> BinancePriceProvider {
         let b_api = FakeBinanceAPI{ response };
@@ -58,7 +73,7 @@ mod tests {
             Ok("[]".to_string())
         });
         let binance_provider = create_binance_provider_fixture(api_call);
-        let prices = binance_provider.prices();
+        let prices = binance_provider.prices(&START_TIME, &END_TIME);
         assert!( prices.is_ok() );
         assert!( prices.unwrap().is_empty() );
     }
@@ -70,48 +85,52 @@ mod tests {
             Ok(FakeBinanceAPI::SINGLE_PRICE_RESPONSE.to_string())
         });
         let binance_provider = create_binance_provider_fixture(api_call);
-        let prices = binance_provider.prices().unwrap();
+        let prices = binance_provider.prices(&START_TIME, &END_TIME).unwrap();
         assert_eq!( prices.len(), 1 );
         assert_float_absolute_eq!( prices[0], 0.01633102 );
-    }
- 
-    #[test]
-    fn test_binance_provider_returns_average_price_if_many_prices() {
-        let api_call: AggTradesCall = Box::new( |symbol,_,_,_,_| {
-            assert_eq!( symbol, BinancePriceProvider::SYMBOL.to_string());
-            Ok(FakeBinanceAPI::MULTIPLE_PRICES_RESPONSE.to_string())
-        });
-        let binance_provider = create_binance_provider_fixture(api_call);
-        let prices = binance_provider.prices().unwrap();
-        assert_eq!( prices.len(), 1 );
-        assert_float_absolute_eq!( prices[0], 2.333333333 );
     }
 
     #[test]
     fn test_binance_provider_returns_error_on_api_error() {
         let api_call: AggTradesCall = Box::new( |_,_,_,_,_| Err( anyhow::Error::msg("some error") ));
         let binance_provider = create_binance_provider_fixture(api_call);
-        assert!( binance_provider.prices().is_err() );
+        assert!( binance_provider.prices(&START_TIME, &END_TIME).is_err() );
     }
 
     #[test]
     fn test_binance_provider_returns_error_on_missing_price_data() {
         let api_call: AggTradesCall = Box::new( |_,_,_,_,_| Ok(FakeBinanceAPI::MISSING_PRICE_RESPONSE.to_string()));
         let binance_provider = create_binance_provider_fixture(api_call);
-        assert!( binance_provider.prices().is_err() );
+        assert!( binance_provider.prices(&START_TIME, &END_TIME).is_err() );
     }
 
     #[test]
     fn test_binance_provider_returns_error_on_non_numeric_price_data() {
         let api_call: AggTradesCall = Box::new( |_,_,_,_,_| Ok(FakeBinanceAPI::INVALID_PRICE_RESPONSE.to_string()));
         let binance_provider = create_binance_provider_fixture(api_call);
-        assert!( binance_provider.prices().is_err() );
+        assert!( binance_provider.prices(&START_TIME, &END_TIME).is_err() );
+    }
+
+    #[test]
+    fn test_binance_provider_returns_average_price_from_single_time_window() {
+        let api_call: AggTradesCall = Box::new( |symbol,_,start_time,end_time,_| {
+            assert_eq!( symbol, BinancePriceProvider::SYMBOL.to_string()) ;
+            assert_eq!( start_time, Some(START_TIME.timestamp_millis()) );
+            assert_eq!( end_time, Some(END_TIME.timestamp_millis()) );
+            Ok(FakeBinanceAPI::MULTIPLE_PRICES_RESPONSE.to_string())
+        });
+
+        let binance_provider = create_binance_provider_fixture(api_call);
+        let prices = binance_provider.prices(&START_TIME, &END_TIME).unwrap();
+        assert_eq!( prices.len(), 1 );
+        assert_float_absolute_eq!( prices[0], 2.333333333 );
     }
 
     // #[test]
-    // fn test_binance_provider_can_filter_prices_by_time_range() {
-        // TODO
+    // fn test_binance_provider_returns_average_prices_from_multiple_time_windows() {
+    //   TODO
     // }
+
 
     type AggTradesCall = Box<dyn Fn(&str,Option<i64>,Option<i64>,Option<i64>,Option<i64>) -> anyhow::Result<String> >;
     struct FakeBinanceAPI {
