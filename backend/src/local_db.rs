@@ -1,6 +1,8 @@
 use redis::{Client, Connection, RedisError};
 use std::net::IpAddr;
 
+const TOKENS_SET: &str = "tokens_of_interest";
+
 pub struct LocalDb {
     client: Client,
 }
@@ -28,9 +30,31 @@ impl LocalDb {
         self.client.get_connection()
     }
 
-    pub fn ping(&self) -> Result<String, RedisError> {
+    /// Reads tokens of interest from db. 
+    /// If db is uninitialized it populates provided defaults.
+    ///
+    /// # Arguments
+    ///
+    /// * `defaults` - Default tokens to use if not found in db.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<String>)` - Tokens of interest from the db.
+    /// * `Err(RedisError)` - Any db error.
+    pub fn read_tokens_or_defaults(&self, defaults: &[&str]) -> Result<Vec<String>, RedisError> {
         let mut con = self.get_connection()?;
-        let pong: String = redis::cmd("PING").query(&mut con)?;
-        Ok(pong)
+        let tokens: Vec<String> = redis::cmd("SMEMBERS")
+            .arg(TOKENS_SET)
+            .query(&mut con)?;
+
+        if tokens.is_empty() {
+            println!("No tokens of interest found in db, populating with defaults");
+            for token in defaults {
+                redis::cmd("SADD").arg(TOKENS_SET).arg(token).execute(&mut con);
+            }
+            Ok(defaults.iter().map(|token| token.to_string()).collect())
+        } else {
+            Ok(tokens)
+        }
     }
 } 
