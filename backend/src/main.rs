@@ -1,11 +1,12 @@
-use redis::{Commands, Client};
+mod env;
+mod local_db;
+use local_db::LocalDb;
 
 fn main() {
-    // Connect to Redis server at localhost:6379
-    let client = Client::open("redis://127.0.0.1/").expect("Invalid Redis URL");
-    let mut con = client.get_connection().expect("Failed to connect to Redis");
+    let env_config = env::load_from_env(|key| std::env::var(key));
+    
+    let local_db = LocalDb::new(env_config.ip, env_config.port).expect("Failed to connect to db");
 
-    // Simple PING command to test connection
-    let pong: String = redis::cmd("PING").query(&mut con).expect("Failed to execute PING");
-    println!("Redis PING response: {}", pong);
+    let pong = local_db.ping().expect("Failed to ping LocalDb");
+    println!("LocalDb ping successful: {}", pong);
 }
