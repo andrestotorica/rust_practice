@@ -239,4 +239,33 @@ mod tests {
         assert_eq!( prices[1].timestamp, first_window_end );
     }
 
+    #[test]
+    fn test_binance_provider_skips_time_windows_with_no_prices() {
+       // capture 3 windows
+       let end_time = *START_TIME + BinancePriceProvider::TIME_WINDOW * 3;
+
+       let mut mock_api = MockBinanceAPI::new();
+       // call #1
+       mock_api.expect_agg_trades()
+           .times(1)
+           .returning(|_,_,_,_,_| Ok(MULTIPLE_PRICES_RESPONSE.to_string()));
+        // call #2
+        mock_api.expect_agg_trades()
+        .times(1)
+        .returning(|_,_,_,_,_| Ok("[]".to_string()));
+        // call #3
+        mock_api.expect_agg_trades()
+           .times(1)
+           .returning(|_,_,_,_,_| Ok(MULTIPLE_PRICES_RESPONSE_2.to_string()));
+
+        let binance_provider = BinancePriceProvider::new(Box::new(mock_api));
+        let prices = binance_provider.prices(&START_TIME, &end_time).unwrap();
+        
+        assert_eq!( prices.len(), 2 );
+        assert_float_absolute_eq!( prices[0].price, 2.333333333 );
+        assert_eq!( prices[0].timestamp, *START_TIME );
+        assert_float_absolute_eq!( prices[1].price, 1.5 );
+        assert_eq!( prices[1].timestamp, *START_TIME + BinancePriceProvider::TIME_WINDOW * 2 );
+    }
+
 }
