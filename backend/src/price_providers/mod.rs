@@ -3,6 +3,12 @@ mod binance_price_provider;
 use binance_price_provider::binance_api::{BinanceAPI, AggTradesResponse};
 use chrono::{DateTime, Duration, Utc};
 
+pub struct PricePoint {
+    timestamp: DateTime<Utc>,
+    price: f64,
+}
+pub type PriceSeries = Vec<PricePoint>;
+
 struct BinancePriceProvider {
     binance_api: Box<dyn BinanceAPI>,
 }
@@ -15,7 +21,7 @@ impl BinancePriceProvider {
         BinancePriceProvider{ binance_api }
     }
 
-    fn prices(&self, start_time: &DateTime<Utc>, end_time: &DateTime<Utc>) -> anyhow::Result<Vec<f64>> {
+    fn prices(&self, start_time: &DateTime<Utc>, end_time: &DateTime<Utc>) -> anyhow::Result<PriceSeries> {
         let api_response = self.binance_api.agg_trades(
             Self::SYMBOL,
             None,
@@ -36,7 +42,7 @@ impl BinancePriceProvider {
         if count == 0 {
             return Ok(vec![]);
         }
-        Ok( vec![sum/count as f64] )
+        Ok( vec![PricePoint{timestamp: *start_time, price: sum/count as f64}] )
     }
 }
 
@@ -121,7 +127,7 @@ mod tests {
         let prices = binance_provider.prices(&START_TIME, &END_TIME).unwrap();
         
         assert_eq!( prices.len(), 1 );
-        assert_float_absolute_eq!( prices[0], 0.01633102 );
+        assert_float_absolute_eq!( prices[0].price, 0.01633102 );
     }
 
     #[test]
@@ -171,7 +177,8 @@ mod tests {
         let prices = binance_provider.prices(&START_TIME, &END_TIME).unwrap();
 
         assert_eq!( prices.len(), 1 );
-        assert_float_absolute_eq!( prices[0], 2.333333333 );
+        assert_float_absolute_eq!( prices[0].price, 2.333333333 );
+        assert_eq!( prices[0].timestamp, *START_TIME );
     }
 
     // #[test]
