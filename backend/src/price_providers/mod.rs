@@ -4,12 +4,12 @@ use binance_price_provider::binance_api::{BinanceAPI, AggTradesResponse};
 use chrono::{DateTime, Duration, Utc};
 
 pub struct PricePoint {
-    timestamp: DateTime<Utc>,
-    price: f64,
+    pub timestamp: DateTime<Utc>,
+    pub price: f64,
 }
 pub type PriceSeries = Vec<PricePoint>;
 
-struct BinancePriceProvider {
+pub struct BinancePriceProvider {
     binance_api: Box<dyn BinanceAPI>,
 }
 
@@ -17,32 +17,48 @@ impl BinancePriceProvider {
     const SYMBOL: &'static str = "BTCUSDC";
     const TIME_WINDOW: Duration = Duration::minutes(1);
 
-    fn new(binance_api: Box <dyn BinanceAPI>) -> BinancePriceProvider {
+    pub fn new(binance_api: Box <dyn BinanceAPI>) -> BinancePriceProvider {
         BinancePriceProvider{ binance_api }
     }
 
-    fn prices(&self, start_time: &DateTime<Utc>, end_time: &DateTime<Utc>) -> anyhow::Result<PriceSeries> {
+    fn fetch_avg_price_for_window(&self, window_start: &DateTime<Utc>, window_end: &DateTime<Utc>) -> anyhow::Result<Option<f64>> {
         let api_response = self.binance_api.agg_trades(
             Self::SYMBOL,
             None,
-            Some( start_time.timestamp_millis() ),
-            Some( end_time.timestamp_millis() ),
+            Some( window_start.timestamp_millis() ),
+            Some( window_end.timestamp_millis() ),
             None)?;
         let response_json: AggTradesResponse = serde_json::from_str(&api_response)?;
-        
-        let mut count = 0;
-        let sum = response_json
-            .iter()
-            .try_fold(0.0, |sum, trade| -> anyhow::Result<f64> {
-                count += 1;
-                let price = trade.p.parse::<f64>()?;
-                Ok( sum + price )
-            })?;
 
-        if count == 0 {
-            return Ok(vec![]);
+        let response_prices: Vec<f64> = response_json
+            .iter()
+            .map(|trade| trade.p.parse::<f64>())
+            .collect::<Result<Vec<f64>, _>>()?;
+
+        let sum = response_prices.iter().sum::<f64>();
+        let count = response_prices.len() as f64;
+        
+        if !response_prices.is_empty() { Ok(Some(sum / count)) } else { Ok(None) }
+    }
+
+    pub fn prices(&self, start_time: &DateTime<Utc>, end_time: &DateTime<Utc>) -> anyhow::Result<PriceSeries> {
+        let mut prices = Vec::new();
+        let window_starts = std::iter::successors(Some(*start_time), |prev| {
+            let next = *prev + Self::TIME_WINDOW;
+            if next < *end_time { Some(next) } else { None }
+        });
+        for window_start in window_starts {
+            let window_end = std::cmp::min(
+                window_start + Self::TIME_WINDOW - Duration::milliseconds(1),
+                *end_time);
+            match self.fetch_avg_price_for_window(&window_start, &window_end)? {
+                Some(avg_price) => {
+                    prices.push(PricePoint { timestamp: window_start, price: avg_price });
+                },
+                None => {},
+            }
         }
-        Ok( vec![PricePoint{timestamp: *start_time, price: sum/count as f64}] )
+        Ok(prices)
     }
 }
 
@@ -74,6 +90,10 @@ mod tests {
         r#"[{"a": 26129,"p": "1.0","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true },"#,
         r#"{"a": 26129,"p": "2.5","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true },"#,
         r#"{"a": 26129,"p": "3.5","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true }]"#
+    );
+    const MULTIPLE_PRICES_RESPONSE_2: &'static str = concat!(
+        r#"[{"a": 26129,"p": "1.0","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true },"#,
+        r#"{"a": 26129,"p": "2.0","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true }]"#,
     );
     const MISSING_PRICE_RESPONSE: &'static str = r#"[{"a": 26129,"q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true }]"#;
     const INVALID_PRICE_RESPONSE: &'static str = r#"[{"a": 26129,"p": "notafloat","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true }]"#;
@@ -181,9 +201,42 @@ mod tests {
         assert_eq!( prices[0].timestamp, *START_TIME );
     }
 
-    // #[test]
-    // fn test_binance_provider_returns_average_prices_from_multiple_time_windows() {
-    //   TODO
-    // }
+    #[test]
+    fn test_binance_provider_returns_average_prices_from_multiple_time_windows() {
+        // ensure to capture just 2 windows
+        let first_window_end = *START_TIME + BinancePriceProvider::TIME_WINDOW;
+        let end_time = first_window_end + Duration::seconds(1);
+
+        let mut mock_api = MockBinanceAPI::new();
+        // call #1
+        mock_api.expect_agg_trades()
+            .times(1)
+            .with(
+                eq(BinancePriceProvider::SYMBOL), 
+                always(), 
+                eq(Some(START_TIME.timestamp_millis())), 
+                eq(Some(first_window_end.timestamp_millis()-1)), 
+                always() )
+            .returning(|_,_,_,_,_| Ok(MULTIPLE_PRICES_RESPONSE.to_string()));
+        // call #2
+        mock_api.expect_agg_trades()
+        .times(1)
+        .with(
+            eq(BinancePriceProvider::SYMBOL), 
+            always(), 
+            eq(Some(first_window_end.timestamp_millis())), 
+            eq(Some(end_time.timestamp_millis())), 
+            always() )
+        .returning(|_,_,_,_,_| Ok(MULTIPLE_PRICES_RESPONSE_2.to_string()));
+
+        let binance_provider = BinancePriceProvider::new(Box::new(mock_api));
+        let prices = binance_provider.prices(&START_TIME, &end_time).unwrap();
+        
+        assert_eq!( prices.len(), 2 );
+        assert_float_absolute_eq!( prices[0].price, 2.333333333 );
+        assert_eq!( prices[0].timestamp, *START_TIME );
+        assert_float_absolute_eq!( prices[1].price, 1.5 );
+        assert_eq!( prices[1].timestamp, first_window_end );
+    }
 
 }
