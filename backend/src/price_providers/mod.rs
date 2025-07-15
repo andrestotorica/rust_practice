@@ -14,16 +14,15 @@ pub struct BinancePriceProvider {
 }
 
 impl BinancePriceProvider {
-    const SYMBOL: &'static str = "BTCUSDC";
     const TIME_WINDOW: Duration = Duration::minutes(1);
 
     pub fn new(binance_api: Box <dyn BinanceAPI>) -> BinancePriceProvider {
         BinancePriceProvider{ binance_api }
     }
 
-    fn fetch_avg_price_for_window(&self, window_start: &DateTime<Utc>, window_end: &DateTime<Utc>) -> anyhow::Result<Option<f64>> {
+    fn fetch_avg_price_for_window(&self, symbol: &str, window_start: &DateTime<Utc>, window_end: &DateTime<Utc>) -> anyhow::Result<Option<f64>> {
         let api_response = self.binance_api.agg_trades(
-            Self::SYMBOL,
+            symbol,
             None,
             Some( window_start.timestamp_millis() ),
             Some( window_end.timestamp_millis() ),
@@ -41,7 +40,7 @@ impl BinancePriceProvider {
         if !response_prices.is_empty() { Ok(Some(sum / count)) } else { Ok(None) }
     }
 
-    pub fn prices(&self, start_time: &DateTime<Utc>, end_time: &DateTime<Utc>) -> anyhow::Result<PriceSeries> {
+    pub fn prices(&self, symbol: &str, start_time: &DateTime<Utc>, end_time: &DateTime<Utc>) -> anyhow::Result<PriceSeries> {
         let mut prices = Vec::new();
         let window_starts = std::iter::successors(Some(*start_time), |prev| {
             let next = *prev + Self::TIME_WINDOW;
@@ -53,7 +52,7 @@ impl BinancePriceProvider {
                 *end_time);
             match self.fetch_avg_price_for_window(&window_start, &window_end)? {
                 Some(avg_price) => {
-                    prices.push(PricePoint { timestamp: window_start, price: avg_price });
+                prices.push(PricePoint { timestamp: window_start, price: avg_price });
                 },
                 None => {},
             }
@@ -84,6 +83,8 @@ mod tests {
                           limit: Option<i64>) -> anyhow::Result<String>;
         }
     }
+
+    const SYMBOL: &'static str = "BTCUSDC";
 
     const SINGLE_PRICE_RESPONSE: &'static str = r#"[{"a": 26129,"p": "0.01633102","q": "4.70443515","f": 27781,"l": 27781,"T": 1498793709153,"m": true,"M": true }]"#;
     const MULTIPLE_PRICES_RESPONSE: &'static str = concat!(
@@ -116,7 +117,7 @@ mod tests {
         mock_api.expect_agg_trades()
             .times(1)
             .with(
-                eq(BinancePriceProvider::SYMBOL), 
+                eq(SYMBOL), 
                 always(), 
                 always(), 
                 always(), 
@@ -124,7 +125,7 @@ mod tests {
             .returning(|_,_,_,_,_| Ok("[]".to_string()));
 
         let binance_provider = BinancePriceProvider::new(Box::new(mock_api));
-        let prices = binance_provider.prices(&START_TIME, &END_TIME);
+        let prices = binance_provider.prices(SYMBOL, &START_TIME, &END_TIME);
 
         assert!( prices.is_ok() );
         assert!( prices.unwrap().is_empty() );
@@ -136,7 +137,7 @@ mod tests {
         mock_api.expect_agg_trades()
             .times(1)
             .with(
-                eq(BinancePriceProvider::SYMBOL), 
+                eq(SYMBOL), 
                 always(), 
                 always(), 
                 always(), 
@@ -144,7 +145,7 @@ mod tests {
             .returning(|_,_,_,_,_| Ok(SINGLE_PRICE_RESPONSE.to_string()));
 
         let binance_provider = BinancePriceProvider::new(Box::new(mock_api));
-        let prices = binance_provider.prices(&START_TIME, &END_TIME).unwrap();
+        let prices = binance_provider.prices(SYMBOL, &START_TIME, &END_TIME).unwrap();
         
         assert_eq!( prices.len(), 1 );
         assert_float_absolute_eq!( prices[0].price, 0.01633102 );
@@ -157,7 +158,7 @@ mod tests {
             .returning(|_,_,_,_,_| Err(anyhow::Error::msg("some error")));
         
         let binance_provider = BinancePriceProvider::new(Box::new(mock_api));
-        assert!( binance_provider.prices(&START_TIME, &END_TIME).is_err() );
+        assert!( binance_provider.prices(SYMBOL, &START_TIME, &END_TIME).is_err() );
     }
 
     #[test]
@@ -167,7 +168,7 @@ mod tests {
             .returning(|_,_,_,_,_| Ok(MISSING_PRICE_RESPONSE.to_string()));
 
         let binance_provider = BinancePriceProvider::new(Box::new(mock_api));
-        assert!( binance_provider.prices(&START_TIME, &END_TIME).is_err() );
+        assert!( binance_provider.prices(SYMBOL, &START_TIME, &END_TIME).is_err() );
     }
 
     #[test]
@@ -177,7 +178,7 @@ mod tests {
             .returning(|_,_,_,_,_| Ok(INVALID_PRICE_RESPONSE.to_string()));
 
         let binance_provider = BinancePriceProvider::new(Box::new(mock_api));
-        assert!( binance_provider.prices(&START_TIME, &END_TIME).is_err() );
+        assert!( binance_provider.prices(SYMBOL, &START_TIME, &END_TIME).is_err() );
     }
 
     #[test]
@@ -186,7 +187,7 @@ mod tests {
         mock_api.expect_agg_trades()
             .times(1)
             .with(
-                eq(BinancePriceProvider::SYMBOL), 
+                eq(SYMBOL), 
                 always(), 
                 eq(Some(START_TIME.timestamp_millis())), 
                 eq(Some(END_TIME.timestamp_millis())), 
@@ -194,7 +195,7 @@ mod tests {
             .returning(|_,_,_,_,_| Ok(MULTIPLE_PRICES_RESPONSE.to_string()));
 
         let binance_provider = BinancePriceProvider::new(Box::new(mock_api));
-        let prices = binance_provider.prices(&START_TIME, &END_TIME).unwrap();
+        let prices = binance_provider.prices(SYMBOL, &START_TIME, &END_TIME).unwrap();
 
         assert_eq!( prices.len(), 1 );
         assert_float_absolute_eq!( prices[0].price, 2.333333333 );
@@ -212,7 +213,7 @@ mod tests {
         mock_api.expect_agg_trades()
             .times(1)
             .with(
-                eq(BinancePriceProvider::SYMBOL), 
+                eq(SYMBOL), 
                 always(), 
                 eq(Some(START_TIME.timestamp_millis())), 
                 eq(Some(first_window_end.timestamp_millis()-1)), 
@@ -222,7 +223,7 @@ mod tests {
         mock_api.expect_agg_trades()
         .times(1)
         .with(
-            eq(BinancePriceProvider::SYMBOL), 
+            eq(SYMBOL), 
             always(), 
             eq(Some(first_window_end.timestamp_millis())), 
             eq(Some(end_time.timestamp_millis())), 
@@ -230,7 +231,7 @@ mod tests {
         .returning(|_,_,_,_,_| Ok(MULTIPLE_PRICES_RESPONSE_2.to_string()));
 
         let binance_provider = BinancePriceProvider::new(Box::new(mock_api));
-        let prices = binance_provider.prices(&START_TIME, &end_time).unwrap();
+        let prices = binance_provider.prices(SYMBOL, &START_TIME, &end_time).unwrap();
         
         assert_eq!( prices.len(), 2 );
         assert_float_absolute_eq!( prices[0].price, 2.333333333 );
@@ -259,13 +260,33 @@ mod tests {
            .returning(|_,_,_,_,_| Ok(MULTIPLE_PRICES_RESPONSE_2.to_string()));
 
         let binance_provider = BinancePriceProvider::new(Box::new(mock_api));
-        let prices = binance_provider.prices(&START_TIME, &end_time).unwrap();
+        let prices = binance_provider.prices(SYMBOL, &START_TIME, &end_time).unwrap();
         
         assert_eq!( prices.len(), 2 );
         assert_float_absolute_eq!( prices[0].price, 2.333333333 );
         assert_eq!( prices[0].timestamp, *START_TIME );
         assert_float_absolute_eq!( prices[1].price, 1.5 );
         assert_eq!( prices[1].timestamp, *START_TIME + BinancePriceProvider::TIME_WINDOW * 2 );
+    }
+
+    #[test]
+    fn test_binance_provider_returns_prices_for_given_symbol() {
+        const NEW_SYMBOL: &'static str = "ETHUSDT";
+
+        let mut mock_api = MockBinanceAPI::new();
+        mock_api.expect_agg_trades()
+            .times(1)
+            .with(
+                eq(NEW_SYMBOL),
+                always(),
+                always(),
+                always(),
+                always(),
+            )
+            .returning(|_,_,_,_,_| Ok(SINGLE_PRICE_RESPONSE.to_string()));
+
+        let binance_provider = BinancePriceProvider::new(Box::new(mock_api));
+        let _ = binance_provider.prices(NEW_SYMBOL, &START_TIME, &END_TIME);
     }
 
 }
