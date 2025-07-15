@@ -16,8 +16,8 @@ pub struct BinancePriceProvider {
 impl BinancePriceProvider {
     const TIME_WINDOW: Duration = Duration::minutes(1);
 
-    pub fn new(binance_api: Box <dyn BinanceAPI>) -> BinancePriceProvider {
-        BinancePriceProvider{ binance_api }
+    pub fn new(binance_api: Box<dyn BinanceAPI>) -> BinancePriceProvider {
+        BinancePriceProvider { binance_api }
     }
 
     fn fetch_avg_price_for_window(&self, symbol: &str, window_start: &DateTime<Utc>, window_end: &DateTime<Utc>) -> anyhow::Result<Option<f64>> {
@@ -50,11 +50,9 @@ impl BinancePriceProvider {
             let window_end = std::cmp::min(
                 window_start + Self::TIME_WINDOW - Duration::milliseconds(1),
                 *end_time);
-            match self.fetch_avg_price_for_window(&window_start, &window_end)? {
-                Some(avg_price) => {
+            let maybe_price = self.fetch_avg_price_for_window(symbol, &window_start, &window_end)?;
+            if let Some(avg_price) = maybe_price {
                 prices.push(PricePoint { timestamp: window_start, price: avg_price });
-                },
-                None => {},
             }
         }
         Ok(prices)
