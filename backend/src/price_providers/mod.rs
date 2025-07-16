@@ -70,6 +70,10 @@ mod tests {
     use chrono::prelude::*;
     use std::sync::LazyLock;
 
+    // TODO: since creating a test api with mockito is lightweight this tests need improvement
+    // Use a mocked API here and integrate the BinanceApi component into the whole test suite
+    // This will improve test quality and allow further TDD'ing
+
     mock! {
         BinanceAPI {}
         impl BinanceAPI for BinanceAPI {
